@@ -16,6 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -26,7 +28,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public UserResponse getUserProfile(String email) {
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmail(normalizeEmail(email))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile record not found"));
         return UserResponse.fromEntity(user);
     }
@@ -34,8 +36,9 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse updateProfile(String currentEmail, UpdateProfileRequest request) {
-        log.info("Processing self-service profile updates for: {}", currentEmail);
-        User user = userRepository.findByEmail(currentEmail)
+        String normalizedEmail = normalizeEmail(currentEmail);
+        log.info("Processing self-service profile updates for: {}", normalizedEmail);
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile target not found"));
 
         String cleanPhone = request.getPhoneNumber().trim();
@@ -67,5 +70,9 @@ public class UserServiceImpl implements UserService {
         user.setAlternativePhoneNumber(cleanAltPhone);
 
         return UserResponse.fromEntity(userRepository.save(user));
+    }
+
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 }

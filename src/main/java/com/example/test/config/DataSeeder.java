@@ -4,10 +4,12 @@ package com.example.test.config;
 
 
 import com.example.test.model.Role;
+import com.example.test.model.SystemSequence;
 import com.example.test.model.User;
 import com.example.test.model.enums.AppRole;
 import com.example.test.model.enums.Gender;
 import com.example.test.repo.RoleRepository;
+import com.example.test.repo.SystemSequenceRepository;
 import com.example.test.repo.UserRepo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +26,12 @@ import java.util.Collections;
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
 
+    private static final String ACCOUNT_NUMBER_SEQUENCE_KEY = "ACCOUNT_NUMBER";
+    private static final long INITIAL_ACCOUNT_NUMBER = 1000000001L;
+
     private final RoleRepository roleRepository;
     private final UserRepo userRepository;
+    private final SystemSequenceRepository systemSequenceRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -33,6 +39,7 @@ public class DataSeeder implements CommandLineRunner {
     public void run(String... args) throws Exception {
         log.info("Startup DataSeeder initiated. Checking system baseline definitions...");
         seedRoles();
+        seedSystemSequences();
         seedDefaultAdmin();
         log.info("Startup DataSeeder execution cycle successfully wrapped up.");
     }
@@ -44,6 +51,13 @@ public class DataSeeder implements CommandLineRunner {
                 roleRepository.save(new Role(null, roleEnum));
             }
         });
+    }
+
+    private void seedSystemSequences() {
+        if (systemSequenceRepository.findById(ACCOUNT_NUMBER_SEQUENCE_KEY).isEmpty()) {
+            log.info("System sequence '{}' absent. Seeding initial account number state...", ACCOUNT_NUMBER_SEQUENCE_KEY);
+            systemSequenceRepository.save(new SystemSequence(ACCOUNT_NUMBER_SEQUENCE_KEY, INITIAL_ACCOUNT_NUMBER));
+        }
     }
 
     private void seedDefaultAdmin() {
