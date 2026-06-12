@@ -5,6 +5,7 @@ import com.example.test.repo.SystemSequenceRepository;
 import com.example.test.service.AccountNumberGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,8 +27,14 @@ public class JpaTableAccountNumberGenerator implements AccountNumberGenerator {
 
         if (sequence == null) {
             log.info("Initializing system account number sequence table registry row...");
-            sequenceRepository.saveAndFlush(new SystemSequence(ACCOUNT_NUM_SEQ_KEY, INITIAL_ACCOUNT_NUMBER + 1));
-            return String.format("%010d", INITIAL_ACCOUNT_NUMBER);
+            try {
+                sequenceRepository.saveAndFlush(new SystemSequence(ACCOUNT_NUM_SEQ_KEY, INITIAL_ACCOUNT_NUMBER + 1));
+                return String.format("%010d", INITIAL_ACCOUNT_NUMBER);
+            } catch (DataIntegrityViolationException exception) {
+                log.warn("Sequence row was created concurrently. Retrying locked fetch for {}.", ACCOUNT_NUM_SEQ_KEY);
+                sequence = sequenceRepository.findByNameForUpdate(ACCOUNT_NUM_SEQ_KEY)
+                        .orElseThrow(() -> exception);
+            }
         }
 
         Long currentAvailableValue = sequence.getNextValue();

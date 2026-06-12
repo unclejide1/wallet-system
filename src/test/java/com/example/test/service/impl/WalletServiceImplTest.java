@@ -160,6 +160,38 @@ class WalletServiceImplTest {
     }
 
     @Test
+    void transferFundsRejectsSelfTransfer() {
+        FundTransferRequest request = new FundTransferRequest();
+        request.setSourceAccountNumber("1000000001");
+        request.setDestinationAccountNumber("1000000001");
+        request.setAmount(new BigDecimal("1250.00"));
+
+        assertThatThrownBy(() -> walletService.transferFunds("owner@example.com", request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.BAD_REQUEST, "Intra-account transfer to identical target coordinates prohibited");
+    }
+
+    @Test
+    void transferFundsRejectsWhenBalanceIsInsufficient() {
+        Account sourceAccount = createAccount("1000000001", "owner@example.com", "100.00", WalletType.SAVINGS);
+        Account destinationAccount = createAccount("1000000002", "beneficiary@example.com", "1000.00", WalletType.BUSINESS);
+
+        FundTransferRequest request = new FundTransferRequest();
+        request.setSourceAccountNumber("1000000001");
+        request.setDestinationAccountNumber("1000000002");
+        request.setAmount(new BigDecimal("1250.00"));
+
+        when(accountRepository.findByAccountNumberForUpdate("1000000001")).thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByAccountNumberForUpdate("1000000002")).thenReturn(Optional.of(destinationAccount));
+
+        assertThatThrownBy(() -> walletService.transferFunds("owner@example.com", request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.BAD_REQUEST, "Insufficient funds to process transfer request");
+    }
+
+    @Test
     void getTransactionHistoryCapsPageSizeAndMapsTransactions() {
         Account account = createAccount("1000000001", "owner@example.com", "5000.00", WalletType.SAVINGS);
         Transaction transaction = Transaction.builder()

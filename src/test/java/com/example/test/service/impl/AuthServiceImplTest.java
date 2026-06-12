@@ -57,17 +57,13 @@ class AuthServiceImplTest {
 
     @Test
     void onboardUserCreatesSanitizedUserProfile() {
-        OnboardingRequest request = new OnboardingRequest();
+        OnboardingRequest request = validOnboardingRequest();
         request.setFirstName("<b>Ada</b>");
         request.setLastName("<i>Lovelace</i>");
         request.setOtherName("<script>alert(1)</script>Test");
-        request.setGender(Gender.FEMALE);
         request.setAddress("<p>12 Broad Street</p>");
         request.setStateOfOrigin("<span>Lagos</span>");
         request.setEmail(" Ada@example.com ");
-        request.setPassword("Password123!");
-        request.setPhoneNumber("08111111111");
-        request.setAlternativePhoneNumber("08111111112");
 
         Role defaultRole = new Role(1L, AppRole.USER);
 
@@ -104,9 +100,8 @@ class AuthServiceImplTest {
 
     @Test
     void onboardUserThrowsWhenEmailAlreadyExists() {
-        OnboardingRequest request = new OnboardingRequest();
+        OnboardingRequest request = validOnboardingRequest();
         request.setEmail("Ada@example.com");
-        request.setPhoneNumber("08111111111");
 
         when(userRepository.existsByEmail("ada@example.com")).thenReturn(true);
 
@@ -114,6 +109,34 @@ class AuthServiceImplTest {
                 .isInstanceOf(ApiException.class)
                 .extracting("status", "message")
                 .containsExactly(HttpStatus.BAD_REQUEST, "Email address is already registered");
+    }
+
+    @Test
+    void onboardUserThrowsWhenPrimaryPhoneAlreadyExists() {
+        OnboardingRequest request = validOnboardingRequest();
+
+        when(userRepository.existsByEmail("ada@example.com")).thenReturn(false);
+        when(userRepository.existsByPhoneNumber("08111111111")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.onboardUser(request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.BAD_REQUEST, "Primary phone number is already associated with an account");
+    }
+
+    @Test
+    void onboardUserTrimsAlternativePhoneBeforeUniquenessCheck() {
+        OnboardingRequest request = validOnboardingRequest();
+        request.setAlternativePhoneNumber(" 08111111112 ");
+
+        when(userRepository.existsByEmail("ada@example.com")).thenReturn(false);
+        when(userRepository.existsByPhoneNumber("08111111111")).thenReturn(false);
+        when(userRepository.existsByAlternativePhoneNumber("08111111112")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.onboardUser(request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.BAD_REQUEST, "Alternative phone number is already associated with an account");
     }
 
     @Test
@@ -158,5 +181,20 @@ class AuthServiceImplTest {
                 .isInstanceOf(ApiException.class)
                 .extracting("status", "message")
                 .containsExactly(HttpStatus.UNAUTHORIZED, "Invalid email address or password provided");
+    }
+
+    private OnboardingRequest validOnboardingRequest() {
+        OnboardingRequest request = new OnboardingRequest();
+        request.setFirstName("Ada");
+        request.setLastName("Lovelace");
+        request.setOtherName("Test");
+        request.setGender(Gender.FEMALE);
+        request.setAddress("12 Broad Street");
+        request.setStateOfOrigin("Lagos");
+        request.setEmail("ada@example.com");
+        request.setPassword("Password123!");
+        request.setPhoneNumber("08111111111");
+        request.setAlternativePhoneNumber("08111111112");
+        return request;
     }
 }

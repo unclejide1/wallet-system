@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,6 +54,28 @@ class JpaTableAccountNumberGeneratorTest {
             persistedValues.add(sequence.getNextValue());
             return sequence;
         });
+
+        String accountNumber = generator.generateNextAccountNumber();
+
+        assertThat(accountNumber).isEqualTo("1000000042");
+        assertThat(existingSequence.getNextValue()).isEqualTo(1000000043L);
+        assertThat(persistedValues).containsExactly(1000000043L);
+    }
+
+    @Test
+    void generateNextAccountNumberRecoversWhenSequenceIsCreatedConcurrently() {
+        SystemSequence existingSequence = new SystemSequence("ACCOUNT_NUMBER", 1000000042L);
+        List<Long> persistedValues = new ArrayList<>();
+
+        when(sequenceRepository.findByNameForUpdate("ACCOUNT_NUMBER"))
+                .thenReturn(Optional.empty(), Optional.of(existingSequence));
+        when(sequenceRepository.saveAndFlush(any(SystemSequence.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key"))
+                .thenAnswer(invocation -> {
+                    SystemSequence sequence = invocation.getArgument(0);
+                    persistedValues.add(sequence.getNextValue());
+                    return sequence;
+                });
 
         String accountNumber = generator.generateNextAccountNumber();
 
