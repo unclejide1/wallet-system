@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 
 import java.util.List;
 
@@ -74,16 +75,48 @@ public class GlobalExceptionHandler {
         String message = "Invalid value for parameter '%s'".formatted(exception.getName());
         return buildErrorResponse(HttpStatus.BAD_REQUEST, message, List.of(ApiError.of(exception.getName(), message)), request);
     }
-
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadableException(
             HttpMessageNotReadableException exception,
             HttpServletRequest request
     ) {
+        Throwable cause = exception.getCause();
+
+        // Check if the error happened because a value couldn't be mapped to its expected type (like an Enum)
+        if (cause instanceof InvalidFormatException invalidFormatException) {
+            Class<?> targetType = invalidFormatException.getTargetType();
+
+            if (targetType != null && targetType.isEnum()) {
+                // Extract the field name that caused the issue (e.g., "gender")
+                String fieldName = invalidFormatException.getPath().stream()
+                        .map(com.fasterxml.jackson.databind.JsonMappingException.Reference::getFieldName)
+                        .reduce((first, second) -> second) // Gets the exact leaf field
+                        .orElse("field");
+
+                String invalidValue = invalidFormatException.getValue().toString();
+
+                // Extract the list of valid options from the Enum dynamically
+                String acceptedValues = java.util.Arrays.stream(targetType.getEnumConstants())
+                        .map(Object::toString)
+                        .collect(java.util.stream.Collectors.joining(", "));
+
+                String detailedMessage = "Invalid value '%s' for field '%s'. Accepted options are: [%s]"
+                        .formatted(invalidValue, fieldName, acceptedValues);
+
+                return buildErrorResponse(
+                        HttpStatus.BAD_REQUEST,
+                        "Validation failed",
+                        List.of(ApiError.of(fieldName, detailedMessage)),
+                        request
+                );
+            }
+        }
+
+        // Fallback for completely broken JSON structure (e.g., missing curly braces, trailing commas)
         return buildErrorResponse(
                 HttpStatus.BAD_REQUEST,
-                "Request body is missing or malformed",
-                List.of(ApiError.global("Request body is missing or malformed")),
+                "Malformed JSON payload structure or syntax error",
+                List.of(ApiError.global("Request body is missing or structurally malformed")),
                 request
         );
     }
