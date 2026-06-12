@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -43,16 +44,22 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public UserResponse onboardUser(OnboardingRequest request) {
-        log.info("Executing onboarding registration checks for email: {}", request.getEmail());
+        String normalizedEmail = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        String normalizedPhone = request.getPhoneNumber().trim();
+        String normalizedAlternativePhone = request.getAlternativePhoneNumber() != null
+                ? request.getAlternativePhoneNumber().trim()
+                : null;
 
-        if (userRepository.existsByEmail(request.getEmail())) {
+        log.info("Executing onboarding registration checks for email: {}", normalizedEmail);
+
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Email address is already registered");
         }
-        if (userRepository.existsByPhoneNumber(request.getPhoneNumber())) {
+        if (userRepository.existsByPhoneNumber(normalizedPhone)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Primary phone number is already associated with an account");
         }
-        if (request.getAlternativePhoneNumber() != null && !request.getAlternativePhoneNumber().isBlank()
-                && userRepository.existsByAlternativePhoneNumber(request.getAlternativePhoneNumber().trim())) {
+        if (normalizedAlternativePhone != null && !normalizedAlternativePhone.isBlank()
+                && userRepository.existsByAlternativePhoneNumber(normalizedAlternativePhone)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Alternative phone number is already associated with an account");
         }
 
@@ -68,11 +75,11 @@ public class AuthServiceImpl implements AuthService {
         newUser.setAddress(Jsoup.clean(request.getAddress(), Safelist.none()));
         newUser.setStateOfOrigin(Jsoup.clean(request.getStateOfOrigin(), Safelist.none()));
         newUser.setGender(request.getGender());
-        newUser.setEmail(request.getEmail().toLowerCase().trim());
-        newUser.setPhoneNumber(request.getPhoneNumber().trim());
+        newUser.setEmail(normalizedEmail);
+        newUser.setPhoneNumber(normalizedPhone);
 
-        if (request.getAlternativePhoneNumber() != null) {
-            newUser.setAlternativePhoneNumber(request.getAlternativePhoneNumber().trim());
+        if (normalizedAlternativePhone != null) {
+            newUser.setAlternativePhoneNumber(normalizedAlternativePhone);
         }
 
         newUser.setPassword(passwordEncoder.encode(request.getPassword()));
@@ -86,16 +93,17 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
-        log.info("Processing session validation verification for identity path: {}", request.getEmail());
+        String normalizedEmail = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        log.info("Processing session validation verification for identity path: {}", normalizedEmail);
         try {
             authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
+                    new UsernamePasswordAuthenticationToken(normalizedEmail, request.getPassword())
             );
         } catch (AuthenticationException ex) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid email address or password provided");
         }
 
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Validated user context missing from registry"));
 
         return AuthResponse.builder()
