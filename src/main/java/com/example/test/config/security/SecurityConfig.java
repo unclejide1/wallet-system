@@ -36,7 +36,7 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
-//                        .requestMatchers("/api/v1/health").permitAll()
+                        .requestMatchers("/api/v1/health").permitAll()
                         .anyRequest().authenticated()
                 )
                 // LINK THE CUSTOM UNIFIED FORMAT ERROR HANDLERS HERE
