@@ -19,9 +19,8 @@ import java.time.Instant;
 @Table(
         name = "transactions",
         indexes = {
-                @Index(name = "idx_transactions_source_account", columnList = "source_account_number"),
-                @Index(name = "idx_transactions_destination_account", columnList = "destination_account_number"),
-                @Index(name = "idx_transactions_timestamp", columnList = "timestamp"),
+                @Index(name = "idx_transactions_source_account_timestamp", columnList = "source_account_number, timestamp"),
+                @Index(name = "idx_transactions_destination_account_timestamp", columnList = "destination_account_number, timestamp"),
                 @Index(name = "idx_transactions_external_reference", columnList = "external_reference")
         }
 )

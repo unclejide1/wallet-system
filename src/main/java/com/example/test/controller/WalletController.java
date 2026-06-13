@@ -13,6 +13,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -21,6 +23,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
@@ -29,6 +32,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/wallets")
 @RequiredArgsConstructor
+@Validated
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "3. Core Wallet Engine", description = "Protected transactional endpoints handling account creations, ledgers, and cash transfers")
 public class WalletController {
@@ -85,8 +89,8 @@ public class WalletController {
     @Operation(summary = "Retrieve paginated double-entry ledger historical logs corresponding to specified account target")
     public ResponseEntity<ApiResponse<Page<TransactionResponse>>> getStatement(
             @PathVariable String accountNumber,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "page must be greater than or equal to 0") int page,
+            @RequestParam(defaultValue = "20") @Min(value = 1, message = "size must be at least 1") @Max(value = 50, message = "size must not be greater than 50") int size,
             Principal principal,
             Authentication authentication,
             HttpServletRequest request

@@ -38,8 +38,8 @@ public class AuthController {
 
         // REST Standard compliance: Create a canonical location pointing to the resource's destination
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/api/v1/admin/users/{userRef}") // Admins query directly via reference token keys
-                .buildAndExpand(data.getUserRef())
+                .path("/api/v1/users/me")
+                .build()
                 .toUri();
 
         return ResponseEntity.created(location)

@@ -8,6 +8,7 @@ A simple Spring Boot wallet service that supports:
 - wallet-to-wallet transfers
 - idempotent retries for funding and transfer requests when a client reference is supplied
 - wallet statements with transaction history
+- concurrent-safe balance updates using database row locking
 
 ## Tech Stack
 
@@ -161,6 +162,98 @@ Example:
 - `POST /api/v1/wallets/transfer`
 - `GET /api/v1/wallets/{accountNumber}/statement`
 
+## Endpoint Notes And Improvements Applied
+
+- onboarding now returns a `Location` header pointing to `/api/v1/users/me`, which is a user-facing resource instead of an admin-only route
+- wallet statement and admin list endpoints validate pagination inputs and reject negative pages or invalid sizes
+- wallet creation is serialized per user by locking the user row before checking wallet type uniqueness
+- funding and transfer idempotency checks are performed both before work starts and again after account locks are acquired, which makes retry behavior safer under concurrent requests
+- alternative phone numbers are now protected by a database unique constraint, not only an application-level check
+
+## Multithreading And Concurrency Model
+
+This application follows the standard Spring Boot request model:
+
+- each HTTP request is processed on a separate server thread from the embedded servlet container
+- controllers are stateless and delegate all business rules to services
+- concurrency-sensitive wallet operations rely on database transactions and row locks, not Java in-memory locks
+
+### How transfers stay safe under concurrent load
+
+- `transferFunds` runs inside a transaction
+- both the source and destination account rows are locked with `PESSIMISTIC_WRITE`
+- the account numbers are sorted before locking so concurrent transfers acquire locks in the same order and avoid deadlocks
+- the balance debit and credit happen only after both locks are held
+- if a retry with the same `clientReference` arrives while another request is in flight, the second check after lock acquisition allows the service to return the already-created transaction instead of applying the balance movement twice
+
+### How wallet funding stays safe
+
+- `fundWallet` locks the destination wallet row before crediting balance
+- the service performs a second idempotency lookup after the lock is acquired
+- this prevents same-wallet parallel retries from crediting the account twice
+
+### How wallet creation stays safe
+
+- wallet creation locks the owning user row first
+- while that lock is held, the service checks whether the user already has a wallet of that type
+- the database also enforces a unique `(user_id, wallet_type)` constraint as a final safety net
+
+## Database Interaction Design
+
+The application uses Spring Data JPA with transactional services:
+
+- read operations use `@Transactional(readOnly = true)` where appropriate
+- money-moving operations use `@Transactional` so balance updates and transaction records commit or roll back together
+- persistence relies on JPA dirty checking for loaded entities, which avoids unnecessary explicit `save()` calls on already managed account rows
+- idempotency is backed by a unique transaction `externalReference`, which prevents duplicate persisted transfer or funding records
+
+### Indexes And Constraints
+
+The schema includes indexes and constraints aimed at the main access patterns:
+
+- unique indexes on `users.email`, `users.phone_number`, `users.alternative_phone_number`, `users.user_ref`
+- unique index on `accounts.account_number`
+- unique constraint on `(accounts.user_id, accounts.wallet_type)`
+- composite indexes on `transactions.source_account_number, timestamp` and `transactions.destination_account_number, timestamp` for statement queries
+- unique index on `transactions.external_reference` for idempotency lookups
+
+## Performance And Optimization Choices
+
+The current implementation keeps the hot path intentionally small:
+
+- controllers stay thin and avoid business logic
+- transactional sections are short and only include validation, locking, balance movement, and transaction persistence
+- expensive or slow external calls are not part of the transfer path
+- statement queries are paginated and capped at a maximum page size of `50`
+- duplicate-request detection happens early to reduce unnecessary writes
+
+### What makes it fast today
+
+- row-level locking is applied only where money movement requires strict consistency
+- repeated reads are minimized by reusing managed entities inside the transaction
+- statement indexes are aligned with the way statements are queried
+- the default in-memory H2 database keeps local development and testing fast
+
+### What to do in production
+
+- move from H2 to PostgreSQL or MySQL for real production-grade concurrency behavior
+- tune the servlet thread pool and Hikari connection pool together so request throughput does not exceed database capacity
+- add rate limiting to login, funding, and transfer endpoints
+- add request correlation IDs for easier tracing of retries and concurrent activity
+- consider moving notifications, audit exports, and other non-critical side effects to asynchronous processing
+
+## Java Best Practices Used
+
+- layered architecture with controllers, services, repositories, DTOs, and entities separated by responsibility
+- constructor injection via Lombok `@RequiredArgsConstructor`
+- Bean Validation on request bodies and endpoint query parameters
+- centralized exception handling through `@RestControllerAdvice`
+- email and phone normalization before lookup or persistence
+- explicit transactional boundaries around business operations
+- defensive database constraints in addition to application-level validations
+- idempotent request handling for retry-safe financial operations
+- focused unit tests and end-to-end integration tests for the core wallet flow
+
 ## Assumptions Made
 
 - Wallet funding is implemented as a simulated external top-up, not a live payment gateway integration.
@@ -175,13 +268,15 @@ Example:
 - Account numbers are generated sequentially and formatted as 10 digits, starting from `1000000001`.
 - Currency is fixed to `NGN`.
 - Data is stored in an in-memory H2 database, so restarting the app resets all users, wallets, and transactions.
+- The app is designed for correctness first on balance-changing operations, so transfer/funding throughput is intentionally serialized per locked wallet row when contention occurs.
 
 ## Notes For Future Improvements
 
 - integrate a real payment processor for wallet funding
 - add transaction categories and richer audit metadata
 - persist data with PostgreSQL or MySQL instead of in-memory H2
-- add rate limiting, idempotency keys, and more transfer safeguards
+- add explicit idempotency-key headers backed by a dedicated request ledger table
+- add rate limiting and more transfer safeguards
 - add pagination metadata DTOs instead of returning Spring page structure directly
 
 ## Verification

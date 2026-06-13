@@ -4,6 +4,7 @@ import com.example.test.common.api.ApiError;
 import com.example.test.common.api.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -130,6 +131,19 @@ public class GlobalExceptionHandler {
                 HttpStatus.FORBIDDEN,
                 "You do not have permission to access this resource",
                 List.of(ApiError.global("You do not have permission to access this resource")),
+                request
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolationException(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request
+    ) {
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                "Request conflicts with existing data",
+                List.of(ApiError.global("The request could not be completed because a unique or relational constraint was violated")),
                 request
         );
     }

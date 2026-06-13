@@ -21,7 +21,12 @@ import java.util.stream.Collectors;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "users")
+@Table(
+        name = "users",
+        indexes = {
+                @Index(name = "idx_users_deleted", columnList = "deleted")
+        }
+)
 // Overrides the default repository.delete() behavior
 @SQLDelete(sql = "UPDATE users SET deleted = true WHERE id = ?")
 // Automatically appends "AND deleted = false" to all select queries in Hibernate 6
@@ -62,6 +67,7 @@ public class User implements UserDetails {
     @Column(unique = true, nullable = false)
     private String phoneNumber;
 
+    @Column(unique = true)
     private String alternativePhoneNumber;
 
     @Column(nullable = false)
