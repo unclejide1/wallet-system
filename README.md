@@ -8,7 +8,7 @@ A simple Spring Boot wallet service that supports:
 - wallet-to-wallet transfers
 - idempotent retries for funding and transfer requests when a client reference is supplied
 - wallet statements with transaction history
-- concurrent-safe balance updates using database row locking
+- concurrency-safe balance updates using database row locking
 
 ## Tech Stack
 

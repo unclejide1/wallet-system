@@ -160,6 +160,38 @@ class WalletServiceImplTest {
     }
 
     @Test
+    void fundWalletRejectsMismatchedDuplicateReferenceDiscoveredAfterLock() {
+        Account account = createAccount("1000000001", "owner@example.com", "150.00", WalletType.SAVINGS);
+        Transaction existingTransaction = Transaction.builder()
+                .transactionRef("TXN_DUPLICATE")
+                .sourceAccountNumber("0000000000")
+                .destinationAccountNumber("1000000001")
+                .amount(new BigDecimal("75.00"))
+                .type(TransactionType.CREDIT)
+                .status(TransactionStatus.SUCCESS)
+                .narration("Card top-up")
+                .externalReference("PAY-100")
+                .timestamp(Instant.now())
+                .build();
+
+        FundWalletRequest request = new FundWalletRequest();
+        request.setAccountNumber("1000000001");
+        request.setAmount(new BigDecimal("50.00"));
+        request.setNarration("Card top-up");
+        request.setPaymentReference("PAY-100");
+
+        when(transactionRepository.findByExternalReference("PAY-100"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(existingTransaction));
+        when(accountRepository.findByAccountNumberForUpdate("1000000001")).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> walletService.fundWallet("owner@example.com", request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.CONFLICT, "Payment reference has already been used for a different wallet funding request");
+    }
+
+    @Test
     void transferFundsMovesBalanceAndCreatesDoubleEntryTransactions() {
         Account sourceAccount = createAccount("1000000001", "owner@example.com", "5000.00", WalletType.SAVINGS);
         Account destinationAccount = createAccount("1000000002", "beneficiary@example.com", "1000.00", WalletType.BUSINESS);
@@ -229,6 +261,40 @@ class WalletServiceImplTest {
         assertThat(response.getSourceAvailableBalance()).isEqualByComparingTo("3750.00");
         assertThat(response.getDestinationAvailableBalance()).isEqualByComparingTo("2250.00");
         verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void transferFundsRejectsMismatchedDuplicateReferenceDiscoveredAfterLock() {
+        Account sourceAccount = createAccount("1000000001", "owner@example.com", "3750.00", WalletType.SAVINGS);
+        Account destinationAccount = createAccount("1000000002", "beneficiary@example.com", "2250.00", WalletType.BUSINESS);
+        Transaction existingTransaction = Transaction.builder()
+                .transactionRef("TXN_EXISTING-DR")
+                .sourceAccountNumber("1000000001")
+                .destinationAccountNumber("1000000002")
+                .amount(new BigDecimal("1000.00"))
+                .type(TransactionType.DEBIT)
+                .status(TransactionStatus.SUCCESS)
+                .narration("Wallet transfer")
+                .externalReference("TRF-100")
+                .timestamp(Instant.now())
+                .build();
+
+        FundTransferRequest request = new FundTransferRequest();
+        request.setSourceAccountNumber("1000000001");
+        request.setDestinationAccountNumber("1000000002");
+        request.setAmount(new BigDecimal("1250.00"));
+        request.setClientReference("TRF-100");
+
+        when(transactionRepository.findByExternalReference("TRF-100"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(existingTransaction));
+        when(accountRepository.findByAccountNumberForUpdate("1000000001")).thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByAccountNumberForUpdate("1000000002")).thenReturn(Optional.of(destinationAccount));
+
+        assertThatThrownBy(() -> walletService.transferFunds("owner@example.com", request))
+                .isInstanceOf(ApiException.class)
+                .extracting("status", "message")
+                .containsExactly(HttpStatus.CONFLICT, "Client reference has already been used for a different transfer request");
     }
 
     @Test
