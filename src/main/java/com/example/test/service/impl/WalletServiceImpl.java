@@ -61,7 +61,7 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public AccountDetailsResponse createWalletAccount(String userEmail, CreateAccountRequest request) {
-        User user = getUserByEmail(userEmail);
+        User user = lockUserByEmail(userEmail);
 
         if (accountRepository.existsByUserIdAndWalletType(user.getId(), request.getWalletType())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "You already have a wallet account of type: " + request.getWalletType());
@@ -107,12 +107,20 @@ public class WalletServiceImpl implements WalletService {
         if (providedPaymentReference != null) {
             Transaction existingTransaction = transactionRepository.findByExternalReference(paymentReference).orElse(null);
             if (existingTransaction != null) {
-                return resolveExistingFunding(normalizedEmail, destinationAccountNumber, fundingAmount, narration, existingTransaction);
+                return validateAndResolveExistingFunding(normalizedEmail, destinationAccountNumber, fundingAmount, narration, existingTransaction);
             }
         }
 
         Account account = lockAccount(destinationAccountNumber, "Destination wallet account missing");
         validateOwnership(account, normalizedEmail);
+
+        if (providedPaymentReference != null) {
+            Transaction existingTransaction = transactionRepository.findByExternalReference(paymentReference).orElse(null);
+            if (existingTransaction != null) {
+                return validateAndResolveExistingFunding(normalizedEmail, destinationAccountNumber, fundingAmount, narration, existingTransaction);
+            }
+        }
+
         account.getWalletBalance().credit(fundingAmount);
 
         Transaction fundingTransaction = transactionRepository.save(Transaction.builder()
@@ -148,7 +156,7 @@ public class WalletServiceImpl implements WalletService {
         if (clientReference != null) {
             Transaction existingTransaction = transactionRepository.findByExternalReference(clientReference).orElse(null);
             if (existingTransaction != null) {
-                return resolveExistingTransfer(
+                return validateAndResolveExistingTransfer(
                         normalizedEmail,
                         sourceAccountNumber,
                         destinationAccountNumber,
@@ -163,6 +171,20 @@ public class WalletServiceImpl implements WalletService {
         Account sourceAccount = lockedAccounts.get(sourceAccountNumber);
         Account destAccount = lockedAccounts.get(destinationAccountNumber);
         validateOwnership(sourceAccount, normalizedEmail);
+
+        if (clientReference != null) {
+            Transaction existingTransaction = transactionRepository.findByExternalReference(clientReference).orElse(null);
+            if (existingTransaction != null) {
+                return validateAndResolveExistingTransfer(
+                        normalizedEmail,
+                        sourceAccountNumber,
+                        destinationAccountNumber,
+                        transferAmount,
+                        narration,
+                        existingTransaction
+                );
+            }
+        }
 
         WalletBalance sourceBalance = sourceAccount.getWalletBalance();
         WalletBalance destBalance = destAccount.getWalletBalance();
@@ -227,8 +249,8 @@ public class WalletServiceImpl implements WalletService {
         ).map(TransactionResponse::fromEntity);
     }
 
-    private User getUserByEmail(String userEmail) {
-        return userRepository.findByEmail(normalizeEmail(userEmail))
+    private User lockUserByEmail(String userEmail) {
+        return userRepository.findByEmailForUpdate(normalizeEmail(userEmail))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile not found"));
     }
 
@@ -278,18 +300,14 @@ public class WalletServiceImpl implements WalletService {
         return sanitizedReference.isBlank() ? null : sanitizedReference;
     }
 
-    private WalletFundingResponse resolveExistingFunding(
+    private WalletFundingResponse validateAndResolveExistingFunding(
             String userEmail,
             String destinationAccountNumber,
             BigDecimal amount,
             String narration,
             Transaction existingTransaction
     ) {
-        if (existingTransaction.getType() != TransactionType.CREDIT
-                || !SYSTEM_FUNDING_ACCOUNT.equals(existingTransaction.getSourceAccountNumber())
-                || !existingTransaction.getDestinationAccountNumber().equals(destinationAccountNumber)
-                || existingTransaction.getAmount().compareTo(amount) != 0
-                || !Objects.equals(existingTransaction.getNarration(), narration)) {
+        if (!isCompatibleFundingRetry(destinationAccountNumber, amount, narration, existingTransaction)) {
             throw new ApiException(HttpStatus.CONFLICT, "Payment reference has already been used for a different wallet funding request");
         }
 
@@ -298,7 +316,7 @@ public class WalletServiceImpl implements WalletService {
         return WalletFundingResponse.of(existingTransaction, account);
     }
 
-    private FundTransferResponse resolveExistingTransfer(
+    private FundTransferResponse validateAndResolveExistingTransfer(
             String userEmail,
             String sourceAccountNumber,
             String destinationAccountNumber,
@@ -306,11 +324,7 @@ public class WalletServiceImpl implements WalletService {
             String narration,
             Transaction existingTransaction
     ) {
-        if (existingTransaction.getType() != TransactionType.DEBIT
-                || !existingTransaction.getSourceAccountNumber().equals(sourceAccountNumber)
-                || !existingTransaction.getDestinationAccountNumber().equals(destinationAccountNumber)
-                || existingTransaction.getAmount().compareTo(amount) != 0
-                || !Objects.equals(existingTransaction.getNarration(), narration)) {
+        if (!isCompatibleTransferRetry(sourceAccountNumber, destinationAccountNumber, amount, narration, existingTransaction)) {
             throw new ApiException(HttpStatus.CONFLICT, "Client reference has already been used for a different transfer request");
         }
 
@@ -318,6 +332,33 @@ public class WalletServiceImpl implements WalletService {
         Account destinationAccount = getAccount(destinationAccountNumber, "Destination wallet account missing");
         validateOwnership(sourceAccount, userEmail);
         return FundTransferResponse.of(existingTransaction, sourceAccount, destinationAccount);
+    }
+
+    private boolean isCompatibleFundingRetry(
+            String destinationAccountNumber,
+            BigDecimal amount,
+            String narration,
+            Transaction existingTransaction
+    ) {
+        return existingTransaction.getType() == TransactionType.CREDIT
+                && SYSTEM_FUNDING_ACCOUNT.equals(existingTransaction.getSourceAccountNumber())
+                && existingTransaction.getDestinationAccountNumber().equals(destinationAccountNumber)
+                && existingTransaction.getAmount().compareTo(amount) == 0
+                && Objects.equals(existingTransaction.getNarration(), narration);
+    }
+
+    private boolean isCompatibleTransferRetry(
+            String sourceAccountNumber,
+            String destinationAccountNumber,
+            BigDecimal amount,
+            String narration,
+            Transaction existingTransaction
+    ) {
+        return existingTransaction.getType() == TransactionType.DEBIT
+                && existingTransaction.getSourceAccountNumber().equals(sourceAccountNumber)
+                && existingTransaction.getDestinationAccountNumber().equals(destinationAccountNumber)
+                && existingTransaction.getAmount().compareTo(amount) == 0
+                && Objects.equals(existingTransaction.getNarration(), narration);
     }
 
     private String generateTransactionReference() {

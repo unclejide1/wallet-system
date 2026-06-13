@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -90,6 +91,47 @@ class WalletFlowIntegrationTest {
                                 """.formatted(ownerWallet)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("You can only operate on wallet accounts that belong to you"));
+    }
+
+    @Test
+    void onboardReturnsUserFacingLocationHeader() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String email = "location." + suffix + "@wallet.test";
+
+        mockMvc.perform(post("/api/v1/auth/onboard")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Location",
+                                  "lastName": "Check",
+                                  "otherName": "Test",
+                                  "gender": "FEMALE",
+                                  "address": "12 Broad Street, Lagos",
+                                  "stateOfOrigin": "Lagos",
+                                  "email": "%s",
+                                  "password": "%s",
+                                  "phoneNumber": "%s",
+                                  "alternativePhoneNumber": "%s"
+                                }
+                                """.formatted(email, DEFAULT_PASSWORD, nextPhoneNumber(), nextPhoneNumber())))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "http://localhost/api/v1/users/me"));
+    }
+
+    @Test
+    void statementRejectsInvalidPageSize() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String email = "paging." + suffix + "@wallet.test";
+
+        registerUser("Paging", "Check", email);
+        String token = login(email);
+        String wallet = createWallet(token, "SAVINGS");
+
+        mockMvc.perform(get("/api/v1/wallets/{accountNumber}/statement", wallet)
+                        .header("Authorization", bearer(token))
+                        .param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"));
     }
 
     private void registerUser(String firstName, String lastName, String email) throws Exception {
